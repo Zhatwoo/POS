@@ -46,7 +46,7 @@ export default function InventoryPage() {
   const [viewMode, setViewMode] = useState('list'); // 'list' or 'stocktake'
   const [stockTakeData, setStockTakeData] = useState({});
   const [categories, setCategories] = useState(['All']); // Start with 'All', will be populated dynamically
-  const { companyName, account, loading: userLoading } = useUser();
+  const { companyName, account, loading: userLoading, userData } = useUser();
 
   // Product form state
   const [productForm, setProductForm] = useState({
@@ -196,10 +196,35 @@ export default function InventoryPage() {
     setShowProductModal(true);
   };
 
+  // Helper function to check and handle missing account information
+  const checkAccountInfo = (operation = 'perform this operation') => {
+    if (userLoading) {
+      alert('Please wait while your account information is being loaded...');
+      return false;
+    }
+    
+    if (!companyName || !account) {
+      const errorMessage = 'Your account information is not available. This may happen if:\n\n' +
+        '1. Your account was not properly set up during registration\n' +
+        '2. Your account document is missing in the database\n' +
+        '3. There was an error loading your account data\n\n' +
+        'Please try logging out and logging back in. If the problem persists, contact support.';
+      alert(errorMessage);
+      console.error(`Cannot ${operation} - missing account information:`, {
+        companyName,
+        account,
+        userLoading,
+        userData
+      });
+      return false;
+    }
+    
+    return true;
+  };
+
   const handleSaveNewProduct = async () => {
     // Verify companyName and account before any write operation
-    if (!companyName || !account) {
-      alert('Company name or account not available. Cannot add product.');
+    if (!checkAccountInfo('add product')) {
       return;
     }
 
@@ -254,8 +279,7 @@ export default function InventoryPage() {
 
   const handleSaveProduct = async () => {
     // Verify companyName and account before any write operation
-    if (!companyName || !account) {
-      alert('Company name or account not available. Cannot update product.');
+    if (!checkAccountInfo('update product')) {
       return;
     }
 
@@ -313,8 +337,7 @@ export default function InventoryPage() {
 
   const handleStockAdjustment = async () => {
     // Verify companyName and account before any write operation
-    if (!companyName || !account) {
-      alert('Company name or account not available. Cannot adjust stock.');
+    if (!checkAccountInfo('adjust stock')) {
       return;
     }
 
@@ -437,8 +460,7 @@ export default function InventoryPage() {
 
   const handleDeleteProduct = async (product) => {
     // Verify companyName and account before any write operation
-    if (!companyName || !account) {
-      alert('Company name or account not available. Cannot delete product.');
+    if (!checkAccountInfo('delete product')) {
       return;
     }
 
@@ -493,8 +515,7 @@ export default function InventoryPage() {
 
   const handleBulkPriceUpdate = async () => {
     // Verify companyName and account before any write operation
-    if (!companyName || !account) {
-      alert('Company name or account not available. Cannot update prices.');
+    if (!checkAccountInfo('update prices')) {
       return;
     }
 
@@ -559,8 +580,7 @@ export default function InventoryPage() {
 
   const saveStockTake = async () => {
     // Verify companyName and account before any write operation
-    if (!companyName || !account) {
-      alert('Company name or account not available. Cannot save stock take.');
+    if (!checkAccountInfo('save stock take')) {
       return;
     }
 

@@ -138,6 +138,10 @@ export default function RegisterPage() {
           authEmail: emailIdentifier,
           createdAt: serverTimestamp(),
         });
+
+        // Note: Products is now a collection, not a document
+        // Collections are created automatically when the first document is added
+        // No initialization needed - the Products collection will be created when first category/product is added
       } catch (firestoreError) {
         // Edge case: Firebase Auth account was created but Firestore doc creation failed
         console.error('Firestore document creation failed after auth account creation', firestoreError);

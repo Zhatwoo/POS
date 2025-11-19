@@ -48,30 +48,109 @@ export const UserProvider = ({ children }) => {
           
           // Fetch account data from Company/{companyCode}/Account/{userId}
           try {
-            // Use collectionGroup to search across all Account subcollections
-            const accountQuery = query(
-              collectionGroup(db, 'Account'),
-              where('uid', '==', firebaseUser.uid)
-            );
-            const accountSnapshot = await getDocs(accountQuery);
+            let accountDoc = null;
+            let accountData = null;
+            let accountPath = null;
             
-            if (!accountSnapshot.empty) {
-              // Found the account document
-              const accountDoc = accountSnapshot.docs[0];
-              const accountData = { id: accountDoc.id, ...accountDoc.data() };
+            // First, try collectionGroup query to find account document
+            try {
+              const accountQuery = query(
+                collectionGroup(db, 'Account'),
+                where('uid', '==', firebaseUser.uid)
+              );
+              const accountSnapshot = await getDocs(accountQuery);
+              
+              if (!accountSnapshot.empty) {
+                accountDoc = accountSnapshot.docs[0];
+                accountData = { id: accountDoc.id, ...accountDoc.data() };
+                accountPath = accountDoc.ref.path;
+                console.log('✅ Account document found via collectionGroup:', {
+                  accountId: accountDoc.id,
+                  path: accountPath,
+                  data: accountData
+                });
+              }
+            } catch (collectionGroupError) {
+              console.warn('⚠️ collectionGroup query failed, trying fallback method:', {
+                error: collectionGroupError?.message || collectionGroupError,
+                code: collectionGroupError?.code,
+                uid: firebaseUser.uid
+              });
+              
+              // Fallback: Try direct lookup by checking if account exists at Company/{companyCode}/Account/{uid}
+              // We'll need to search through Company documents, but that's expensive
+              // For now, just log the error and continue
+            }
+            
+            // If collectionGroup didn't find the account, try alternative approaches
+            if (!accountDoc) {
+              // Try to extract company code from email if it follows the pattern username@company.com
+              const email = firebaseUser.email || '';
+              const emailParts = email.split('@');
+              if (emailParts.length === 2) {
+                const domain = emailParts[1];
+                // If domain is like "comp-xxxxx.com", extract the company code
+                const domainParts = domain.split('.');
+                if (domainParts.length > 0) {
+                  const possibleCompanyCode = domainParts[0].toUpperCase();
+                  console.log('ℹ️ Attempting direct lookup with possible company code from email:', possibleCompanyCode);
+                  
+                  try {
+                    // Try direct path lookup: Company/{possibleCompanyCode}/Account/{uid}
+                    const directAccountRef = doc(db, 'Company', possibleCompanyCode, 'Account', firebaseUser.uid);
+                    const directAccountSnap = await getDoc(directAccountRef);
+                    
+                    if (directAccountSnap.exists()) {
+                      accountDoc = directAccountSnap;
+                      accountData = { id: directAccountSnap.id, ...directAccountSnap.data() };
+                      accountPath = directAccountRef.path;
+                      console.log('✅ Account document found via direct lookup:', {
+                        accountId: directAccountSnap.id,
+                        path: accountPath,
+                        data: accountData
+                      });
+                    }
+                  } catch (directLookupError) {
+                    console.warn('⚠️ Direct lookup also failed:', directLookupError?.message || directLookupError);
+                  }
+                }
+              }
+            }
+            
+            // Process the found account document
+            if (accountDoc && accountData) {
               setUserData(accountData);
               
               // Extract company and account information from the account document
-              // companyCode is stored in the account document
-              const userCompanyCode = accountData.companyCode || accountData.company;
+              // First try to get companyCode from document data
+              let userCompanyCode = accountData.companyCode || accountData.company;
+              
+              // Fallback: Extract companyCode from document path if not in data
+              // Path format: Company/{companyCode}/Account/{accountId}
+              if (!userCompanyCode && accountPath) {
+                const pathParts = accountPath.split('/');
+                // Find the index of 'Company' and get the next part (companyCode)
+                const companyIndex = pathParts.indexOf('Company');
+                if (companyIndex !== -1 && pathParts.length > companyIndex + 1) {
+                  userCompanyCode = pathParts[companyIndex + 1];
+                  console.log('ℹ️ Extracted companyCode from document path:', userCompanyCode);
+                }
+              }
+              
               const userAccountId = firebaseUser.uid; // Use userId as account identifier
               
               if (userCompanyCode) {
+                console.log('✅ Setting company and account:', {
+                  companyName: userCompanyCode,
+                  account: userAccountId
+                });
                 setCompanyName(userCompanyCode);
                 setAccount(userAccountId);
               } else {
-                // Fallback if companyCode not found
-                console.warn('Company code not found in account document');
+                // Fallback if companyCode not found in data or path
+                console.error('❌ Company code not found in account document or path. Available fields:', Object.keys(accountData));
+                console.error('Account document data:', accountData);
+                console.error('Account document path:', accountPath);
                 setCompanyName(null);
                 setAccount(null);
               }
@@ -86,27 +165,44 @@ export const UserProvider = ({ children }) => {
                 }
               } catch (error) {
                 // users collection might not exist, that's okay
+                console.log('Users collection check skipped:', error?.message || error);
               }
               setIsAdmin(isHardcodedAdmin || userRole === 'admin');
             } else {
               // Account document not found - might be a new user or admin
-              console.warn('Account document not found for user:', firebaseUser.uid);
+              console.warn('⚠️ Account document not found for user:', {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                isHardcodedAdmin: isHardcodedAdmin
+              });
               setUserData(null);
               
               // For hardcoded admin, allow access but don't set company/account
               if (isHardcodedAdmin) {
+                console.log('ℹ️ Hardcoded admin detected - skipping company/account setup');
                 setCompanyName(null);
                 setAccount(null);
                 setIsAdmin(true);
               } else {
                 // Regular user without account document - set to null
+                console.error('❌ Regular user without account document. User may need to complete registration.');
                 setCompanyName(null);
                 setAccount(null);
                 setIsAdmin(false);
               }
             }
           } catch (error) {
-            console.error('Error fetching account data:', error);
+            // Log full error details for debugging
+            console.error('❌ Error fetching account data:', {
+              error: error?.message || String(error),
+              errorObject: error,
+              code: error?.code,
+              stack: error?.stack,
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              errorType: typeof error,
+              errorKeys: error ? Object.keys(error) : []
+            });
             // Set to null if fetch fails - don't use defaults that show wrong data
             setUserData(null);
             setCompanyName(null);

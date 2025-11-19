@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Navbar from '@/app/Components/Navbar';
 import { getNestedCollection, addNestedDocument, updateNestedDocument } from '@/lib/firebase-helpers';
 import { buildSettingsPath } from '@/lib/firebase-config';
 import { useUser } from '@/lib/user-context';
+import { signOut } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
 import { 
   Save, 
   Store, 
@@ -17,10 +20,13 @@ import {
   Settings as SettingsIcon,
   CheckCircle,
   X,
-  DollarSign
+  DollarSign,
+  LogOut,
+  User
 } from 'lucide-react';
 
 const SETTINGS_SECTIONS = [
+  { id: 'profile', label: 'Account Profile', icon: User },
   { id: 'store', label: 'Store Info', icon: Store },
   { id: 'tax', label: 'Tax Settings', icon: Receipt },
   { id: 'currency', label: 'Currency', icon: DollarSign },
@@ -34,12 +40,13 @@ const SETTINGS_SECTIONS = [
 ];
 
 export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState('store');
+  const router = useRouter();
+  const [activeSection, setActiveSection] = useState('profile');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [settingsId, setSettingsId] = useState(null);
-  const { companyName, account, loading: userLoading } = useUser();
+  const { companyName, account, loading: userLoading, user, userData } = useUser();
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -220,6 +227,17 @@ export default function SettingsPage() {
     }));
   };
 
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // Redirect to login page after successful logout
+      router.push('/auth/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+      alert('Error signing out. Please try again.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -247,14 +265,23 @@ export default function SettingsPage() {
               <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
               <p className="text-gray-600 mt-2">Configure your POS system settings</p>
             </div>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center gap-2 font-semibold shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Save className="w-5 h-5" />
-              {saving ? 'Saving...' : 'Save All Settings'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all duration-200 flex items-center gap-2 font-semibold shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Save className="w-5 h-5" />
+                {saving ? 'Saving...' : 'Save All Settings'}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all duration-200 flex items-center gap-2 font-semibold shadow-md hover:shadow-lg"
+              >
+                <LogOut className="w-5 h-5" />
+                Logout
+              </button>
+            </div>
           </div>
 
           {/* Success Message */}
@@ -295,6 +322,7 @@ export default function SettingsPage() {
             {/* Settings Content */}
             <div className="lg:col-span-3">
               <div className="bg-white rounded-lg shadow-md p-6 border border-gray-100">
+                {activeSection === 'profile' && <AccountProfileSection user={user} userData={userData} companyName={companyName} account={account} />}
                 {activeSection === 'store' && <StoreInfoSection settings={settings.storeInfo} onUpdate={updateSetting} />}
                 {activeSection === 'tax' && <TaxSettingsSection settings={settings.taxSettings} onUpdate={updateSetting} />}
                 {activeSection === 'currency' && <CurrencySection settings={settings.currency} onUpdate={updateSetting} />}
@@ -308,6 +336,91 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Account Profile Section
+function AccountProfileSection({ user, userData, companyName, account }) {
+  const formatDate = (timestamp) => {
+    if (!timestamp) return 'N/A';
+    try {
+      if (timestamp.toDate) {
+        return timestamp.toDate().toLocaleString();
+      }
+      return new Date(timestamp).toLocaleString();
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-gray-900 mb-6">Account Profile</h2>
+      <div className="space-y-6">
+        {/* Profile Header */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 border-2 border-blue-200">
+          <div className="flex items-center gap-4">
+            <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center text-white text-3xl font-bold">
+              {userData?.fullName?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || 'U'}
+            </div>
+            <div>
+              <h3 className="text-2xl font-bold text-gray-900">
+                {userData?.fullName || 'User'}
+              </h3>
+              <p className="text-gray-600 mt-1">{userData?.username || 'N/A'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Account Information */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Full Name</label>
+            <div className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg bg-gray-50 text-gray-700">
+              {userData?.fullName || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Username</label>
+            <div className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg bg-gray-50 text-gray-700">
+              {userData?.username || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
+            <div className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg bg-gray-50 text-gray-700">
+              {user?.email || userData?.authEmail || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">User ID</label>
+            <div className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-mono text-sm">
+              {user?.uid || account || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Company Code</label>
+            <div className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg bg-gray-50 text-gray-700">
+              {companyName || userData?.companyCode || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Account Created</label>
+            <div className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg bg-gray-50 text-gray-700">
+              {formatDate(userData?.createdAt)}
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Info */}
+        <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+          <h4 className="text-sm font-semibold text-blue-900 mb-2">Account Information</h4>
+          <p className="text-sm text-blue-800">
+            This is your account profile information. Contact your administrator if you need to update any details.
+          </p>
         </div>
       </div>
     </div>

@@ -19,17 +19,18 @@ const getCompanyConfig = (companyName = null, account = null) => {
 
 // Helper function to build nested collection path
 // Firestore structure must alternate: Collection/Document/Collection/Document...
-// Structure: Company(collection)/Company1(document)/Account1(collection)/Products(document)/categories(collection)/{category}(document)/products(collection)
-// For products, we need: Company/Company1/Account1/Products/categories/{category}/products
+// Structure: Company(collection)/{companyCode}(document)/Account(collection)/{accountId}(document)/Products(collection)/{category}(document)/products(collection)
+// For products, we need: Company/{companyCode}/Account/{accountId}/Products/{category}/products
+// This gives us 7 segments (odd) which is valid for a collection reference
 export const buildProductsPath = (category = null, companyName = null, account = null) => {
   const { companyCode, companyName: compName, account: acc } = getCompanyConfig(companyName, account);
-  // Base path: Company/Company1/Account1/Products/categories
-  // This is: collection/document/collection/document/collection
-  const basePath = `${companyCode}/${compName}/${acc}/Products/categories`;
+  // Base path: Company/{companyCode}/Account/{accountId}/Products
+  // This is: collection/document/collection/document/collection (5 segments - odd, valid)
+  const basePath = `${companyCode}/${compName}/Account/${acc}/Products`;
   
   if (category) {
     // Add category document and products collection: {category}/products
-    // This makes it: collection/document/collection/document/collection/document/collection
+    // This makes it: collection/document/collection/document/collection/document/collection (7 segments - odd, valid)
     return `${basePath}/${category}/products`;
   }
   return basePath;
@@ -41,25 +42,24 @@ export const getAllCategoryPaths = (categories, companyName = null, account = nu
 };
 
 // Helper function to build transactions path
-// Structure: Company(collection)/Company1(document)/Account1(collection)/Transactions(document)/transactions(collection)
-// For transactions, we need: Company/Company1/Account1/Transactions/transactions
-// This is: collection/document/collection/document/collection (5 segments - odd number, valid for collection reference)
-// Following the same pattern as products: Company/Company1/Account1/Products/categories/{category}/products
+// Structure: Company(collection)/{companyCode}(document)/Account(collection)/{accountId}(document)/Transactions(collection)/{transactionId}(document)
+// For transactions, we need: Company/{companyCode}/Account/{accountId}/Transactions
+// This is: collection/document/collection/document/collection (5 segments - odd, valid)
 export const buildTransactionsPath = (companyName = null, account = null) => {
   const { companyCode, companyName: compName, account: acc } = getCompanyConfig(companyName, account);
-  // Path: Company/Company1/Account1/Transactions/transactions
-  // This is: collection/document/collection/document/collection (5 segments - odd number, valid)
-  return `${companyCode}/${compName}/${acc}/Transactions/transactions`;
+  // Path: Company/{companyCode}/Account/{accountId}/Transactions
+  // This is: collection/document/collection/document/collection (5 segments - odd, valid)
+  return `${companyCode}/${compName}/Account/${acc}/Transactions`;
 };
 
 // Helper function to build settings path
-// Structure: Company(collection)/Company1(document)/Account1(collection)/Settings(document)/settings(collection)
-// For settings, we need: Company/Company1/Account1/Settings/settings
-// This is: collection/document/collection/document/collection (5 segments - odd number, valid)
+// Structure: Company(collection)/{companyCode}(document)/Account(collection)/{accountId}(document)/Settings(collection)/{settingId}(document)
+// For settings, we need: Company/{companyCode}/Account/{accountId}/Settings
+// This is: collection/document/collection/document/collection (5 segments - odd, valid)
 export const buildSettingsPath = (companyName = null, account = null) => {
   const { companyCode, companyName: compName, account: acc } = getCompanyConfig(companyName, account);
-  // Path: Company/Company1/Account1/Settings/settings
-  // This is: collection/document/collection/document/collection (5 segments - odd number, valid)
-  return `${companyCode}/${compName}/${acc}/Settings/settings`;
+  // Path: Company/{companyCode}/Account/{accountId}/Settings
+  // This is: collection/document/collection/document/collection (5 segments - odd, valid)
+  return `${companyCode}/${compName}/Account/${acc}/Settings`;
 };
 

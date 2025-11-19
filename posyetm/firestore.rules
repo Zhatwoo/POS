@@ -71,32 +71,75 @@ service cloud.firestore {
     }
     
     // Account subcollection - allows users to create their own account during registration
+    // Note: allow read: if true enables collectionGroup queries on 'Account' subcollection
     match /Company/{companyCode}/Account/{accountId} {
       // Allow public read for username availability checks during registration
+      // This also enables collectionGroup queries on Account subcollection
       allow read: if true;
       allow create: if isAuthenticated() && request.auth.uid == accountId;
       allow update: if isAuthenticated() && (request.auth.uid == accountId || isAdmin());
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Products - nested structure: Company/{companyName}/{account}/Products/categories/{category}/products/{productId}
-    // Public read for sales/POS, authenticated users can write to their own account, admin delete
-    match /Company/{companyName}/{account}/Products/categories/{category}/products/{productId} {
-      allow read: if true;
-      allow create, update: if isAuthenticated() && account == request.auth.uid;
-      allow delete: if isAuthenticated() && isAdmin();
+    // Products - nested structure: Company/{companyCode}/Account/{accountId}/Products/{category}/products/{productId}
+    // Accounts in the same company can read each other's products, but only account owner can write
+    // Structure: Company(collection)/{companyCode}(document)/Account(collection)/{accountId}(document)/Products(collection)/{category}(document)/products(collection)/{productId}(document)
+    match /Company/{companyCode}/Account/{accountId}/Products/{category}/products/{productId} {
+      // Helper function to check if user belongs to the same company
+      function isSameCompany() {
+        return isAuthenticated() && 
+               exists(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)) &&
+               get(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)).data.companyCode == companyCode;
+      }
+      
+      allow read: if isAuthenticated() && (accountId == request.auth.uid || isSameCompany() || isAdmin());
+      allow create, update: if isAuthenticated() && accountId == request.auth.uid;
+      allow delete: if isAuthenticated() && (accountId == request.auth.uid || isAdmin());
       
       // History subcollection for stock adjustments
       match /history/{historyId} {
-        allow read: if isAuthenticated() && account == request.auth.uid;
-        allow create, update, delete: if isAuthenticated() && account == request.auth.uid;
+        allow read: if isAuthenticated() && (accountId == request.auth.uid || isSameCompany() || isAdmin());
+        allow create, update, delete: if isAuthenticated() && accountId == request.auth.uid;
       }
     }
     
     // Allow collection queries for Products - needed for getNestedCollection to work
-    // Users can only query products collection in their own account to prevent data leakage
-    match /Company/{companyName}/{account}/Products/categories/{category}/products {
-      allow read: if isAuthenticated() && account == request.auth.uid;
+    // Accounts in the same company can query each other's products
+    match /Company/{companyCode}/Account/{accountId}/Products/{category}/products {
+      function isSameCompany() {
+        return isAuthenticated() && 
+               exists(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)) &&
+               get(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)).data.companyCode == companyCode;
+      }
+      
+      allow read: if isAuthenticated() && (accountId == request.auth.uid || isSameCompany() || isAdmin());
+    }
+    
+    // Allow collection queries for Products collection - needed for category discovery
+    // Accounts in the same company can query each other's Products collection
+    match /Company/{companyCode}/Account/{accountId}/Products {
+      function isSameCompany() {
+        return isAuthenticated() && 
+               exists(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)) &&
+               get(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)).data.companyCode == companyCode;
+      }
+      
+      allow read: if isAuthenticated() && (accountId == request.auth.uid || isSameCompany() || isAdmin());
+    }
+    
+    // Category document - nested structure: Company/{companyCode}/Account/{accountId}/Products/{category}
+    // Allows creation and management of category documents
+    match /Company/{companyCode}/Account/{accountId}/Products/{category} {
+      function isSameCompany() {
+        return isAuthenticated() && 
+               exists(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)) &&
+               get(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)).data.companyCode == companyCode;
+      }
+      
+      allow read: if isAuthenticated() && (accountId == request.auth.uid || isSameCompany() || isAdmin());
+      allow create: if isAuthenticated() && accountId == request.auth.uid;
+      allow update: if isAuthenticated() && (accountId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isAdmin();
     }
     
     // Orders - legacy flat structure (deprecated, use nested structure instead)
@@ -121,20 +164,19 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Transactions - nested structure: Company/{companyName}/{account}/Transactions/transactions/{transactionId}
-    // Note: Following same pattern as products - account is a collection, Transactions is a document, transactions is a collection
-    // Path structure: Company(collection)/{companyName}(document)/{account}(collection)/Transactions(document)/transactions(collection)/{transactionId}(document)
-    // Users can only access transactions for their own account (account == request.auth.uid)
-    match /Company/{companyName}/{account}/Transactions/transactions/{transactionId} {
-      allow create: if isAuthenticated() && account == request.auth.uid;
-      allow read: if isAuthenticated() && account == request.auth.uid;
-      allow update: if isAuthenticated() && account == request.auth.uid && (resource.data.userId == request.auth.uid || isAdmin());
+    // Transactions - nested structure: Company/{companyCode}/Account/{accountId}/Transactions/{transactionId}
+    // Structure: Company(collection)/{companyCode}(document)/Account(collection)/{accountId}(document)/Transactions(collection)/{transactionId}(document)
+    // Users can only access transactions for their own account
+    match /Company/{companyCode}/Account/{accountId}/Transactions/{transactionId} {
+      allow create: if isAuthenticated() && accountId == request.auth.uid;
+      allow read: if isAuthenticated() && accountId == request.auth.uid;
+      allow update: if isAuthenticated() && accountId == request.auth.uid && (resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Allow collection queries for Transactions
-    match /Company/{companyName}/{account}/Transactions/transactions {
-      allow read: if isAuthenticated() && account == request.auth.uid;
+    // Allow collection queries for Transactions - needed for getNestedCollection to work
+    match /Company/{companyCode}/Account/{accountId}/Transactions {
+      allow read: if isAuthenticated() && accountId == request.auth.uid;
     }
     
     // Categories - public read, authenticated write
@@ -144,17 +186,18 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Settings - nested structure: Company/{companyName}/{account}/Settings/settings/{settingId}
+    // Settings - nested structure: Company/{companyCode}/Account/{accountId}/Settings/{settingId}
+    // Structure: Company(collection)/{companyCode}(document)/Account(collection)/{accountId}(document)/Settings(collection)/{settingId}(document)
     // Authenticated users can read and write to their own account settings
-    match /Company/{companyName}/{account}/Settings/settings/{settingId} {
-      allow read: if isAuthenticated() && account == request.auth.uid;
-      allow create, update: if isAuthenticated() && account == request.auth.uid;
+    match /Company/{companyCode}/Account/{accountId}/Settings/{settingId} {
+      allow read: if isAuthenticated() && accountId == request.auth.uid;
+      allow create, update: if isAuthenticated() && accountId == request.auth.uid;
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Allow collection queries for Settings
-    match /Company/{companyName}/{account}/Settings/settings {
-      allow read: if isAuthenticated() && account == request.auth.uid;
+    // Allow collection queries for Settings - needed for getNestedCollection to work
+    match /Company/{companyCode}/Account/{accountId}/Settings {
+      allow read: if isAuthenticated() && accountId == request.auth.uid;
     }
     
     // Legacy settings collection (for backward compatibility)
