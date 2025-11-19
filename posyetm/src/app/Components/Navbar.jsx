@@ -19,7 +19,6 @@ const NAV_LINKS = [
     label: 'Reports ',
     href: '/reports',
   },
-  { label: 'Users', href: '/users' },
   { label: 'Settings', href: '/settings' },
 ];
 
@@ -35,6 +34,18 @@ export default function Navbar() {
     }
     if (href === '/sales') {
       return pathname === '/sales' || pathname === '/pos';
+    }
+    if (href === '/inventory') {
+      return pathname === '/inventory';
+    }
+    if (href === '/transactions') {
+      return pathname === '/transactions' || pathname === '/history';
+    }
+    if (href === '/reports') {
+      return pathname === '/reports';
+    }
+    if (href === '/settings') {
+      return pathname === '/settings';
     }
     return pathname === href;
   };

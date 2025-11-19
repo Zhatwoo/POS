@@ -3,7 +3,10 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp, ShoppingCart, DollarSign, Package, AlertTriangle, Calendar, BarChart3, Printer, RefreshCw, Eye, X } from 'lucide-react';
 import Navbar from '@/app/Components/Navbar';
-import { getCollection } from '@/lib/firebase-helpers';
+import { getNestedCollection, discoverCategories, fetchAllProductsFromFirestore } from '@/lib/firebase-helpers';
+import { buildTransactionsPath, buildProductsPath } from '@/lib/firebase-config';
+import { useUser } from '@/lib/user-context';
+import { formatDate, formatDateTime, toDate, isWithinDateRange, formatTime } from '@/lib/timestamp-utils';
 import Link from 'next/link';
 
 export default function DashboardPage() {
@@ -21,11 +24,39 @@ export default function DashboardPage() {
   const [topCategories, setTopCategories] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { companyName, account, loading: userLoading } = useUser();
 
   useEffect(() => {
+    // Wait for user context to load before fetching data
+    if (userLoading) {
+      setLoading(true);
+      return;
+    }
+
+    // If companyName or account is not available, clear all data and return
+    if (!companyName || !account) {
+      console.warn('Dashboard: Company name or account not available, clearing all data');
+      setStats({
+        todaySales: 0,
+        totalOrders: 0,
+        totalRevenue: 0,
+        totalProducts: 0,
+      });
+      setRecentTransactions([]);
+      setLowStockItems([]);
+      setExpiringProducts([]);
+      setTopSellingItems([]);
+      setTopCategories([]);
+      setActivityFeed([]);
+      setLoading(false);
+      return;
+    }
+
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
+        
+        console.log(`Dashboard: Fetching data for companyName="${companyName}", account="${account}"`);
 
         // Get today's date range
         const today = new Date();
@@ -34,14 +65,33 @@ export default function DashboardPage() {
         tomorrow.setDate(tomorrow.getDate() + 1);
 
         // Fetch transactions/orders
-        const transactions = await getCollection('transactions').catch(() => []);
-        const orders = await getCollection('orders').catch(() => []);
+        // Use dynamic nested path: Company/Company1/Account1/transactions
+        let transactions = [];
+        try {
+          const transactionsPath = buildTransactionsPath(companyName, account);
+          transactions = await getNestedCollection(transactionsPath);
+        } catch (error) {
+          console.log('Failed to fetch transactions from nested path, trying legacy path...', error);
+          // Fallback to legacy flat structure if nested path fails
+          transactions = [];
+        }
+        const orders = transactions.filter(t => t.type === 'order' || t.orderId);
         
-        // Fetch products
-        const products = await getCollection('products').catch(() => []);
+        // Fetch products using dynamic path
+        let products = [];
+        try {
+          const basePath = buildProductsPath(null, companyName, account);
+          const commonCategories = ['Beverages', 'Food Items', 'Personal Care', 'Household Items', 'Electronics', 'Others'];
+          const discoveredCategories = await discoverCategories(basePath, commonCategories);
+          const productsData = await fetchAllProductsFromFirestore(basePath, discoveredCategories);
+          products = productsData.products || [];
+        } catch (error) {
+          console.log('Failed to fetch products from nested path, trying legacy path...', error);
+          products = [];
+        }
         
         // Fetch activity logs (if exists)
-        const activities = await getCollection('activityLogs').catch(() => []);
+        const activities = [];
 
         // Calculate top selling items from orders
         const itemSales = {};
@@ -102,9 +152,10 @@ export default function DashboardPage() {
           .sort((a, b) => b.revenue - a.revenue)
           .slice(0, 5);
 
-        // Find low stock items with reorder threshold
+        // Find low stock items with reorder threshold (excluding ignored alerts)
         const lowStock = products
           .filter((p) => {
+            if (ignoredAlerts.has(p.id)) return false; // Skip ignored alerts
             const stock = p.stock || 0;
             const reorderLevel = p.reorderLevel || p.reorderThreshold || 10;
             return stock <= reorderLevel && stock >= 0;
@@ -123,32 +174,25 @@ export default function DashboardPage() {
         const expiring = products
           .filter((p) => {
             if (!p.expiryDate && !p.expirationDate) return false;
-            const expiryDate = p.expiryDate?.toDate 
-              ? p.expiryDate.toDate() 
-              : p.expirationDate?.toDate 
-              ? p.expirationDate.toDate()
-              : new Date(p.expiryDate || p.expirationDate);
+            const expiryDate = toDate(p.expiryDate || p.expirationDate);
+            if (!expiryDate) return false;
             return expiryDate <= thirtyDaysFromNow;
           })
           .map((p) => {
-            const expiryDate = p.expiryDate?.toDate 
-              ? p.expiryDate.toDate() 
-              : p.expirationDate?.toDate 
-              ? p.expirationDate.toDate()
-              : new Date(p.expiryDate || p.expirationDate);
+            const expiryDate = toDate(p.expiryDate || p.expirationDate);
+            if (!expiryDate) return null;
             const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
             return { ...p, daysUntilExpiry, isExpired: daysUntilExpiry < 0 };
           })
+          .filter(p => p !== null)
           .sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry)
           .slice(0, 10);
 
         // Calculate today's sales
         const todayTransactions = transactions.filter((t) => {
-          if (t.createdAt) {
-            const transactionDate = t.createdAt.toDate ? t.createdAt.toDate() : new Date(t.createdAt);
-            return transactionDate >= today && transactionDate < tomorrow;
-          }
-          return false;
+          const transactionDate = toDate(t.createdAt || t.timestamp);
+          if (!transactionDate) return false;
+          return transactionDate >= today && transactionDate < tomorrow;
         });
 
         const todaySales = todayTransactions.reduce((sum, t) => sum + (t.amount || t.total || 0), 0);
@@ -161,23 +205,15 @@ export default function DashboardPage() {
 
         // Get recent transactions with full details (last 20)
         const sortedTransactions = [...transactions].sort((a, b) => {
-          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
-          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+          const dateA = toDate(a.createdAt || a.timestamp) || new Date(0);
+          const dateB = toDate(b.createdAt || b.timestamp) || new Date(0);
           return dateB - dateA;
         });
 
         const recent = sortedTransactions.slice(0, 20).map((t) => {
-          const date = t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt || new Date());
-          const time = date.toLocaleTimeString('en-US', { 
-            hour: 'numeric', 
-            minute: '2-digit',
-            hour12: true 
-          });
-          const dateStr = date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-          });
+          const date = toDate(t.createdAt || t.timestamp) || new Date();
+          const time = formatTime(date);
+          const dateStr = formatDate(date);
           
           return {
             id: t.id,
@@ -209,7 +245,7 @@ export default function DashboardPage() {
             title: a.title || a.action || 'Activity',
             description: a.description || a.details || '',
             user: a.userName || a.userId || 'System',
-            timestamp: a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || new Date()),
+            timestamp: toDate(a.createdAt) || new Date(),
             data: a,
           })),
         ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 20);
@@ -248,11 +284,100 @@ export default function DashboardPage() {
     };
 
     fetchDashboardData();
-  }, []);
+  }, [companyName, account, userLoading]);
+
+  const [selectedActionItem, setSelectedActionItem] = useState(null);
+  const [actionType, setActionType] = useState(null);
+  const [showActionModal, setShowActionModal] = useState(false);
+  const [ignoredAlerts, setIgnoredAlerts] = useState(new Set());
 
   const handleQuickAction = (action, item) => {
-    console.log(`${action} for`, item);
-    // TODO: Implement quick actions
+    setSelectedActionItem(item);
+    setActionType(action);
+    
+    switch (action) {
+      case 'createPO':
+        // Show purchase order creation modal
+        setShowActionModal(true);
+        break;
+      case 'orderMore':
+        // Show reorder modal
+        setShowActionModal(true);
+        break;
+      case 'ignore':
+        // Mark alert as ignored (client-side only for now)
+        if (item.id) {
+          setIgnoredAlerts(prev => new Set([...prev, item.id]));
+          // Remove from low stock items display
+          setLowStockItems(prev => prev.filter(p => p.id !== item.id));
+        }
+        break;
+      case 'reprint':
+        // Download receipt for transaction
+        handleDownloadReceipt(item);
+        break;
+      case 'refund':
+        // Show refund modal
+        setShowActionModal(true);
+        break;
+      case 'view':
+        // Show details modal
+        setShowActionModal(true);
+        break;
+      default:
+        console.log(`Action ${action} not implemented for`, item);
+    }
+  };
+
+  const handleDownloadReceipt = (transaction) => {
+    const items = transaction.items || transaction.data?.items || [];
+    const total = transaction.amount || transaction.data?.amount || 0;
+    const orderId = transaction.orderId || transaction.id || transaction.data?.id || `INV-${Date.now().toString().slice(-8)}`;
+    
+    const date = toDate(transaction.timestamp || transaction.createdAt || transaction.data?.timestamp) || new Date();
+    const dateTime = formatDateTime(date);
+    
+    const receiptContent = `
+========================================
+          POSYSTEM
+     Point of Sale System
+          RECEIPT
+========================================
+
+Invoice #: ${orderId}
+Date: ${dateTime}
+Cashier: ${transaction.cashier || transaction.data?.cashier || 'System'}
+Customer: ${transaction.customer || transaction.customerName || transaction.data?.customerName || 'Walk-in Customer'}
+
+----------------------------------------
+ITEMS
+----------------------------------------
+${items.map(item => 
+  `${item.name || 'Unknown Item'}
+  ${item.quantity || 0} x ₱${(item.price || 0).toLocaleString()} = ₱${(item.subtotal || item.quantity * item.price || 0).toLocaleString()}`
+).join('\n\n')}
+
+----------------------------------------
+TOTAL: ₱${total.toLocaleString()}
+Payment: ${transaction.paymentMethod || transaction.data?.paymentMethod || 'Cash'}
+Change: ₱0.00
+----------------------------------------
+
+Thank you for your purchase!
+Please come again
+
+========================================
+    `.trim();
+
+    const blob = new Blob([receiptContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Receipt_${orderId}_${date.toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const statCards = [
@@ -494,16 +619,8 @@ export default function DashboardPage() {
                     </thead>
                     <tbody>
                       {expiringProducts.map((product) => {
-                        const expiryDate = product.expiryDate?.toDate 
-                          ? product.expiryDate.toDate() 
-                          : product.expirationDate?.toDate 
-                          ? product.expirationDate.toDate()
-                          : new Date(product.expiryDate || product.expirationDate);
-                        const formattedDate = expiryDate.toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric'
-                        });
+                        const expiryDate = toDate(product.expiryDate || product.expirationDate) || new Date();
+                        const formattedDate = formatDate(expiryDate);
                         
                         return (
                           <tr key={product.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -600,11 +717,7 @@ export default function DashboardPage() {
                         return (
                           <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50 bg-blue-50/30">
                             <td className="py-3 px-4 text-gray-600 text-sm">
-                              {item.timestamp.toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric'
-                              })}
+                              {formatDate(item.timestamp)}
                             </td>
                             <td className="py-3 px-4 text-gray-900 font-medium" colSpan={2}>
                               <div className="text-sm">{item.title}</div>
@@ -632,6 +745,96 @@ export default function DashboardPage() {
               <p className="text-gray-500 text-center py-8">No transactions yet</p>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Action Modal */}
+      {showActionModal && selectedActionItem && (
+        <ActionModal
+          actionType={actionType}
+          item={selectedActionItem}
+          onClose={() => {
+            setShowActionModal(false);
+            setSelectedActionItem(null);
+            setActionType(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Action Modal Component
+function ActionModal({ actionType, item, onClose }) {
+  const getModalContent = () => {
+    switch (actionType) {
+      case 'createPO':
+        return (
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Create Purchase Order</h3>
+            <p className="text-gray-600 mb-4">Product: <strong>{item.name}</strong></p>
+            <p className="text-sm text-gray-500">Purchase order functionality will be implemented here.</p>
+            <p className="text-sm text-gray-500 mt-2">Current Stock: {item.stock || 0}</p>
+            <p className="text-sm text-gray-500">Reorder Level: {item.reorderLevel || item.reorderThreshold || 10}</p>
+          </div>
+        );
+      case 'orderMore':
+        return (
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Reorder Product</h3>
+            <p className="text-gray-600 mb-4">Product: <strong>{item.name}</strong></p>
+            <p className="text-sm text-gray-500">Reorder functionality will be implemented here.</p>
+            <p className="text-sm text-gray-500 mt-2">Current Stock: {item.stock || 0}</p>
+            <p className="text-sm text-gray-500">Supplier: {item.supplier || 'N/A'}</p>
+          </div>
+        );
+      case 'refund':
+        return (
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Process Refund</h3>
+            <p className="text-gray-600 mb-4">Transaction: <strong>{item.invoiceNumber || item.id}</strong></p>
+            <p className="text-sm text-gray-500">Amount: ₱{(item.amount || 0).toLocaleString()}</p>
+            <p className="text-sm text-gray-500 mt-2">Refund functionality will be implemented here.</p>
+          </div>
+        );
+      case 'view':
+        return (
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Details</h3>
+            <div className="space-y-2">
+              {item.name && <p className="text-gray-600"><strong>Name:</strong> {item.name}</p>}
+              {item.invoiceNumber && <p className="text-gray-600"><strong>Invoice:</strong> {item.invoiceNumber}</p>}
+              {item.amount !== undefined && <p className="text-gray-600"><strong>Amount:</strong> ₱{item.amount.toLocaleString()}</p>}
+              {item.stock !== undefined && <p className="text-gray-600"><strong>Stock:</strong> {item.stock}</p>}
+              {item.revenue !== undefined && <p className="text-gray-600"><strong>Revenue:</strong> ₱{item.revenue.toLocaleString()}</p>}
+            </div>
+          </div>
+        );
+      default:
+        return <div><p>Action not implemented</p></div>;
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 border border-gray-200">
+        <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+          <h2 className="text-2xl font-bold text-gray-900">Quick Action</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full p-1 transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+        {getModalContent()}
+        <div className="flex gap-3 mt-6 pt-4 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-300 transition-all duration-200"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>

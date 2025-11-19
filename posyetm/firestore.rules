@@ -7,10 +7,36 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    // Helper function to check if user is admin
-    function isAdmin() {
+    // Hardcoded super admin email - must match the one in user-context.js
+    function isHardcodedAdmin() {
       return isAuthenticated() && 
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+             request.auth.token.email != null &&
+             request.auth.token.email.matches('(?i).*admin@posystem\\.com.*');
+    }
+    
+    // Helper function to check if user is admin (either hardcoded or from Firestore)
+    function isAdmin() {
+      return isHardcodedAdmin() || 
+             (isAuthenticated() && 
+              exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    
+    function hasNonEmptyString(data, field) {
+      return field in data && data[field] is string && data[field].size() > 0;
+    }
+    
+    function isValidContractCode(code) {
+      return code is string &&
+             code.matches('^[A-Z0-9]{4}-[A-Z0-9]{4}$') &&
+             exists(/databases/$(database)/documents/contracts/$(code));
+    }
+    
+    function isValidCompanyPayload(data) {
+      return hasNonEmptyString(data, 'name') &&
+             hasNonEmptyString(data, 'address') &&
+             hasNonEmptyString(data, 'contact') &&
+             hasNonEmptyString(data, 'contractCode');
     }
     
     // Users collection - users can read their own data, admins can read all
@@ -22,29 +48,93 @@ service cloud.firestore {
                               (request.auth.uid == userId || isAdmin());
     }
     
-    // Products - public read, authenticated write
+    // Products - legacy flat structure (deprecated, use nested structure instead)
+    // Public read kept for backward compatibility with POS/sales, but nested structure is preferred
     match /products/{productId} {
       allow read: if true;
       allow create, update: if isAuthenticated();
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Orders - authenticated users can read all (for dashboard), create their own
+    match /contracts/{code} {
+      allow read, write: if isAuthenticated() && isAdmin();
+    }
+    
+    match /Company/{companyCode} {
+      allow read: if true;
+      allow create: if (
+                        !isAuthenticated() &&
+                        isValidCompanyPayload(request.resource.data) &&
+                        isValidContractCode(request.resource.data.contractCode)
+                      ) || (isAuthenticated() && isAdmin());
+      allow update, delete: if isAuthenticated() && isAdmin();
+    }
+    
+    // Account subcollection - allows users to create their own account during registration
+    match /Company/{companyCode}/Account/{accountId} {
+      // Allow public read for username availability checks during registration
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == accountId;
+      allow update: if isAuthenticated() && (request.auth.uid == accountId || isAdmin());
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+    
+    // Products - nested structure: Company/{companyName}/{account}/Products/categories/{category}/products/{productId}
+    // Public read for sales/POS, authenticated users can write to their own account, admin delete
+    match /Company/{companyName}/{account}/Products/categories/{category}/products/{productId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated() && account == request.auth.uid;
+      allow delete: if isAuthenticated() && isAdmin();
+      
+      // History subcollection for stock adjustments
+      match /history/{historyId} {
+        allow read: if isAuthenticated() && account == request.auth.uid;
+        allow create, update, delete: if isAuthenticated() && account == request.auth.uid;
+      }
+    }
+    
+    // Allow collection queries for Products - needed for getNestedCollection to work
+    // Users can only query products collection in their own account to prevent data leakage
+    match /Company/{companyName}/{account}/Products/categories/{category}/products {
+      allow read: if isAuthenticated() && account == request.auth.uid;
+    }
+    
+    // Orders - legacy flat structure (deprecated, use nested structure instead)
+    // Restricted to user's own data only to prevent data leakage
     match /orders/{orderId} {
       allow create: if isAuthenticated();
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && 
+                    (resource.data.userId == request.auth.uid || isAdmin());
       allow update: if isAuthenticated() && 
                       (resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Transactions - authenticated users can read all (for dashboard), create their own
+    // Transactions - legacy flat structure (deprecated, use nested structure instead)
+    // Restricted to user's own data only to prevent data leakage
     match /transactions/{transactionId} {
       allow create: if isAuthenticated();
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && 
+                     (resource.data.userId == request.auth.uid || isAdmin());
       allow update: if isAuthenticated() && 
                       (resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if isAuthenticated() && isAdmin();
+    }
+    
+    // Transactions - nested structure: Company/{companyName}/{account}/Transactions/transactions/{transactionId}
+    // Note: Following same pattern as products - account is a collection, Transactions is a document, transactions is a collection
+    // Path structure: Company(collection)/{companyName}(document)/{account}(collection)/Transactions(document)/transactions(collection)/{transactionId}(document)
+    // Users can only access transactions for their own account (account == request.auth.uid)
+    match /Company/{companyName}/{account}/Transactions/transactions/{transactionId} {
+      allow create: if isAuthenticated() && account == request.auth.uid;
+      allow read: if isAuthenticated() && account == request.auth.uid;
+      allow update: if isAuthenticated() && account == request.auth.uid && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+    
+    // Allow collection queries for Transactions
+    match /Company/{companyName}/{account}/Transactions/transactions {
+      allow read: if isAuthenticated() && account == request.auth.uid;
     }
     
     // Categories - public read, authenticated write
@@ -54,7 +144,20 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isAdmin();
     }
     
-    // Settings - admins only
+    // Settings - nested structure: Company/{companyName}/{account}/Settings/settings/{settingId}
+    // Authenticated users can read and write to their own account settings
+    match /Company/{companyName}/{account}/Settings/settings/{settingId} {
+      allow read: if isAuthenticated() && account == request.auth.uid;
+      allow create, update: if isAuthenticated() && account == request.auth.uid;
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+    
+    // Allow collection queries for Settings
+    match /Company/{companyName}/{account}/Settings/settings {
+      allow read: if isAuthenticated() && account == request.auth.uid;
+    }
+    
+    // Legacy settings collection (for backward compatibility)
     match /settings/{settingId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && isAdmin();

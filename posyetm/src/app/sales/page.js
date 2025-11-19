@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Navbar from '@/app/Components/Navbar';
-import { getCollection, addDocument, updateDocument } from '@/lib/firebase-helpers';
-import { Search, Plus, Minus, Trash2, ShoppingCart, Barcode, X } from 'lucide-react';
+import { updateNestedDocument, fetchAllProductsFromFirestore, addNestedDocument, discoverCategories } from '@/lib/firebase-helpers';
+import { buildProductsPath, buildTransactionsPath } from '@/lib/firebase-config';
+import { useUser } from '@/lib/user-context';
+import { Search, Plus, Minus, Trash2, ShoppingCart, Barcode, X, CheckCircle } from 'lucide-react';
 
 export default function SalesPage() {
   const [products, setProducts] = useState([]);
@@ -11,164 +13,77 @@ export default function SalesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [showProductModal, setShowProductModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [manualQuantity, setManualQuantity] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [showCheckoutSuccess, setShowCheckoutSuccess] = useState(false);
+  const [checkoutTotal, setCheckoutTotal] = useState(0);
   const barcodeInputRef = useRef(null);
-
-  const categories = ['All', 'Beverages', 'Food Items', 'Personal Care', 'Household Items', 'Electronics', 'Others'];
+  const [categories, setCategories] = useState(['All']); // Start with 'All', will be populated dynamically
+  const { companyName, account, loading: userLoading } = useUser();
 
   useEffect(() => {
+    // Wait for user context to load before fetching data
+    if (userLoading || !companyName || !account) {
+      setLoading(false);
+      setProducts([]);
+      setCategories(['All']);
+      return;
+    }
+
     const fetchProducts = async () => {
       try {
-        const data = await getCollection('products');
+        setLoading(true);
         
-        // Add dummy products if no products from Firebase
-        if (data.length === 0) {
-          const dummyProducts = [
-            // Beverages
-            { id: '1', name: 'Coca Cola', price: 25, stock: 50, sku: 'COKE001', barcode: '1234567890', category: 'Beverages' },
-            { id: '2', name: 'Pepsi', price: 25, stock: 45, sku: 'PEPSI001', barcode: '1234567891', category: 'Beverages' },
-            { id: '3', name: 'Sprite', price: 25, stock: 40, sku: 'SPRITE001', barcode: '1234567892', category: 'Beverages' },
-            { id: '4', name: 'Royal', price: 25, stock: 35, sku: 'ROYAL001', barcode: '1234567893', category: 'Beverages' },
-            { id: '5', name: 'Mountain Dew', price: 25, stock: 30, sku: 'MTDEW001', barcode: '1234567894', category: 'Beverages' },
-            { id: '6', name: 'Coke Zero', price: 28, stock: 25, sku: 'COKEZ001', barcode: '1234567895', category: 'Beverages' },
-            { id: '7', name: 'Pepsi Max', price: 28, stock: 20, sku: 'PEPMAX001', barcode: '1234567896', category: 'Beverages' },
-            { id: '8', name: '7-Up', price: 25, stock: 15, sku: '7UP001', barcode: '1234567897', category: 'Beverages' },
-            { id: '9', name: 'Mirinda', price: 25, stock: 10, sku: 'MIR001', barcode: '1234567898', category: 'Beverages' },
-            { id: '10', name: 'Fanta', price: 25, stock: 8, sku: 'FANTA001', barcode: '1234567899', category: 'Beverages' },
-            { id: '11', name: 'Red Bull', price: 75, stock: 50, sku: 'RB001', barcode: '1234567900', category: 'Beverages' },
-            { id: '12', name: 'Monster', price: 85, stock: 45, sku: 'MON001', barcode: '1234567901', category: 'Beverages' },
-            { id: '13', name: 'Gatorade', price: 45, stock: 40, sku: 'GAT001', barcode: '1234567902', category: 'Beverages' },
-            { id: '14', name: 'Powerade', price: 45, stock: 35, sku: 'POW001', barcode: '1234567903', category: 'Beverages' },
-            { id: '19', name: 'C2 Green Tea', price: 30, stock: 10, sku: 'C2001', barcode: '1234567908', category: 'Beverages' },
-            { id: '20', name: 'Nestea', price: 30, stock: 8, sku: 'NESTEA001', barcode: '1234567909', category: 'Beverages' },
-            { id: '21', name: 'Lipton', price: 32, stock: 50, sku: 'LIP001', barcode: '1234567910', category: 'Beverages' },
-            { id: '22', name: 'Sting', price: 30, stock: 45, sku: 'STING001', barcode: '1234567911', category: 'Beverages' },
-            { id: '23', name: 'Cobra', price: 30, stock: 40, sku: 'COB001', barcode: '1234567912', category: 'Beverages' },
-            { id: '24', name: 'Cobra Energy', price: 35, stock: 35, sku: 'COBE001', barcode: '1234567913', category: 'Beverages' },
-            { id: '25', name: 'Cobra Gold', price: 40, stock: 30, sku: 'COBG001', barcode: '1234567914', category: 'Beverages' },
-            { id: '26', name: 'Cobra Silver', price: 38, stock: 25, sku: 'COBS001', barcode: '1234567915', category: 'Beverages' },
-            { id: '27', name: 'Cobra Platinum', price: 45, stock: 20, sku: 'COBP001', barcode: '1234567916', category: 'Beverages' },
-            { id: '28', name: 'Cobra Diamond', price: 50, stock: 15, sku: 'COBD001', barcode: '1234567917', category: 'Beverages' },
-            { id: '29', name: 'Cobra Titanium', price: 55, stock: 10, sku: 'COBT001', barcode: '1234567918', category: 'Beverages' },
-            { id: '30', name: 'Cobra Ultimate', price: 60, stock: 8, sku: 'COBU001', barcode: '1234567919', category: 'Beverages' },
-            // Food Items
-            { id: '31', name: 'Lucky Me Pancit Canton', price: 15, stock: 100, sku: 'LMPC001', barcode: '1234567920', category: 'Food Items' },
-            { id: '32', name: 'Lucky Me Beef Noodles', price: 15, stock: 95, sku: 'LMBN001', barcode: '1234567921', category: 'Food Items' },
-            { id: '33', name: 'Lucky Me Chicken Noodles', price: 15, stock: 90, sku: 'LMCN001', barcode: '1234567922', category: 'Food Items' },
-            { id: '34', name: 'Nissin Cup Noodles', price: 35, stock: 80, sku: 'NCN001', barcode: '1234567923', category: 'Food Items' },
-            { id: '35', name: 'Sky Flakes', price: 25, stock: 75, sku: 'SF001', barcode: '1234567924', category: 'Food Items' },
-            { id: '36', name: 'Fita Biscuits', price: 30, stock: 70, sku: 'FB001', barcode: '1234567925', category: 'Food Items' },
-            { id: '37', name: 'Rebisco Crackers', price: 28, stock: 65, sku: 'RC001', barcode: '1234567926', category: 'Food Items' },
-            { id: '38', name: 'Oreo Cookies', price: 45, stock: 60, sku: 'OC001', barcode: '1234567927', category: 'Food Items' },
-            // Personal Care
-            { id: '39', name: 'Safeguard Soap', price: 35, stock: 50, sku: 'SGS001', barcode: '1234567928', category: 'Personal Care' },
-            { id: '40', name: 'Dove Soap', price: 45, stock: 45, sku: 'DS001', barcode: '1234567929', category: 'Personal Care' },
-            { id: '41', name: 'Colgate Toothpaste', price: 55, stock: 40, sku: 'CT001', barcode: '1234567930', category: 'Personal Care' },
-            { id: '42', name: 'Crest Toothpaste', price: 60, stock: 35, sku: 'CRT001', barcode: '1234567931', category: 'Personal Care' },
-            { id: '43', name: 'Head & Shoulders Shampoo', price: 120, stock: 30, sku: 'HSS001', barcode: '1234567932', category: 'Personal Care' },
-            { id: '44', name: 'Pantene Shampoo', price: 110, stock: 25, sku: 'PS001', barcode: '1234567933', category: 'Personal Care' },
-            { id: '45', name: 'Sunsilk Shampoo', price: 100, stock: 20, sku: 'SS001', barcode: '1234567934', category: 'Personal Care' },
-            // Household Items
-            { id: '46', name: 'Tide Detergent', price: 85, stock: 40, sku: 'TD001', barcode: '1234567935', category: 'Household Items' },
-            { id: '47', name: 'Ariel Detergent', price: 90, stock: 35, sku: 'AD001', barcode: '1234567936', category: 'Household Items' },
-            { id: '48', name: 'Downy Fabric Softener', price: 75, stock: 30, sku: 'DFS001', barcode: '1234567937', category: 'Household Items' },
-            { id: '49', name: 'Zonrox Bleach', price: 40, stock: 25, sku: 'ZB001', barcode: '1234567938', category: 'Household Items' },
-            { id: '50', name: 'Mr. Muscle Cleaner', price: 95, stock: 20, sku: 'MMC001', barcode: '1234567939', category: 'Household Items' },
-            { id: '51', name: 'Glade Air Freshener', price: 65, stock: 15, sku: 'GAF001', barcode: '1234567940', category: 'Household Items' },
-            // Electronics
-            { id: '52', name: 'AA Batteries', price: 50, stock: 60, sku: 'AAB001', barcode: '1234567941', category: 'Electronics' },
-            { id: '53', name: 'AAA Batteries', price: 45, stock: 55, sku: 'AAAB001', barcode: '1234567942', category: 'Electronics' },
-            { id: '54', name: 'USB Cable', price: 120, stock: 40, sku: 'USBC001', barcode: '1234567943', category: 'Electronics' },
-            { id: '55', name: 'Phone Charger', price: 150, stock: 35, sku: 'PC001', barcode: '1234567944', category: 'Electronics' },
-            { id: '56', name: 'LED Bulb', price: 80, stock: 30, sku: 'LED001', barcode: '1234567945', category: 'Electronics' },
-            // Others
-            { id: '15', name: 'Vitamilk', price: 35, stock: 30, sku: 'VITA001', barcode: '1234567904', category: 'Others' },
-            { id: '16', name: 'Bear Brand', price: 40, stock: 25, sku: 'BEAR001', barcode: '1234567905', category: 'Others' },
-            { id: '17', name: 'Nestle Milk', price: 38, stock: 20, sku: 'NEST001', barcode: '1234567906', category: 'Others' },
-            { id: '18', name: 'Alaska Milk', price: 36, stock: 15, sku: 'ALAS001', barcode: '1234567907', category: 'Others' },
-          ];
-          setProducts(dummyProducts);
-        } else {
-          setProducts(data);
+        // Only fetch if companyName and account are available
+        if (!companyName || !account) {
+          console.warn('Company name or account not available, skipping data fetch');
+          setProducts([]);
+          setCategories(['All']);
+          setLoading(false);
+          return;
         }
+
+        // Use dynamic nested path: Company/{companyCode}/Account/{userId}/Products/categories/{category}/products
+        const basePath = buildProductsPath(null, companyName, account);
+        
+        // First, discover categories dynamically
+        const commonCategories = ['Beverages', 'Food Items', 'Personal Care', 'Household Items', 'Electronics', 'Others'];
+        let discoveredCategories = [];
+        try {
+          discoveredCategories = await discoverCategories(basePath, commonCategories);
+        } catch (error) {
+          console.error('Failed to discover categories:', error);
+          discoveredCategories = [];
+        }
+        
+        const allCategories = ['All', ...discoveredCategories];
+        setCategories(allCategories);
+        
+        const productCategories = discoveredCategories;
+        
+        // Fetch products using dynamic path only
+        let data = [];
+        try {
+          const firestoreData = await fetchAllProductsFromFirestore(basePath, productCategories);
+          data = firestoreData.products || [];
+          console.log(`✅ Fetched ${data.length} products from ${firestoreData.categories.length} categories`);
+        } catch (error) {
+          console.error('Failed to fetch products from nested path:', error);
+          // Don't fallback - return empty array for new accounts
+          data = [];
+        }
+        
+        // Set products from Firestore
+        setProducts(data);
       } catch (error) {
         console.error('Error fetching products:', error);
-        // Add dummy products on error (same as above with categories)
-        const dummyProducts = [
-          // Beverages
-          { id: '1', name: 'Coca Cola', price: 25, stock: 50, sku: 'COKE001', barcode: '1234567890', category: 'Beverages' },
-          { id: '2', name: 'Pepsi', price: 25, stock: 45, sku: 'PEPSI001', barcode: '1234567891', category: 'Beverages' },
-          { id: '3', name: 'Sprite', price: 25, stock: 40, sku: 'SPRITE001', barcode: '1234567892', category: 'Beverages' },
-          { id: '4', name: 'Royal', price: 25, stock: 35, sku: 'ROYAL001', barcode: '1234567893', category: 'Beverages' },
-          { id: '5', name: 'Mountain Dew', price: 25, stock: 30, sku: 'MTDEW001', barcode: '1234567894', category: 'Beverages' },
-          { id: '6', name: 'Coke Zero', price: 28, stock: 25, sku: 'COKEZ001', barcode: '1234567895', category: 'Beverages' },
-          { id: '7', name: 'Pepsi Max', price: 28, stock: 20, sku: 'PEPMAX001', barcode: '1234567896', category: 'Beverages' },
-          { id: '8', name: '7-Up', price: 25, stock: 15, sku: '7UP001', barcode: '1234567897', category: 'Beverages' },
-          { id: '9', name: 'Mirinda', price: 25, stock: 10, sku: 'MIR001', barcode: '1234567898', category: 'Beverages' },
-          { id: '10', name: 'Fanta', price: 25, stock: 8, sku: 'FANTA001', barcode: '1234567899', category: 'Beverages' },
-          { id: '11', name: 'Red Bull', price: 75, stock: 50, sku: 'RB001', barcode: '1234567900', category: 'Beverages' },
-          { id: '12', name: 'Monster', price: 85, stock: 45, sku: 'MON001', barcode: '1234567901', category: 'Beverages' },
-          { id: '13', name: 'Gatorade', price: 45, stock: 40, sku: 'GAT001', barcode: '1234567902', category: 'Beverages' },
-          { id: '14', name: 'Powerade', price: 45, stock: 35, sku: 'POW001', barcode: '1234567903', category: 'Beverages' },
-          { id: '19', name: 'C2 Green Tea', price: 30, stock: 10, sku: 'C2001', barcode: '1234567908', category: 'Beverages' },
-          { id: '20', name: 'Nestea', price: 30, stock: 8, sku: 'NESTEA001', barcode: '1234567909', category: 'Beverages' },
-          { id: '21', name: 'Lipton', price: 32, stock: 50, sku: 'LIP001', barcode: '1234567910', category: 'Beverages' },
-          { id: '22', name: 'Sting', price: 30, stock: 45, sku: 'STING001', barcode: '1234567911', category: 'Beverages' },
-          { id: '23', name: 'Cobra', price: 30, stock: 40, sku: 'COB001', barcode: '1234567912', category: 'Beverages' },
-          { id: '24', name: 'Cobra Energy', price: 35, stock: 35, sku: 'COBE001', barcode: '1234567913', category: 'Beverages' },
-          { id: '25', name: 'Cobra Gold', price: 40, stock: 30, sku: 'COBG001', barcode: '1234567914', category: 'Beverages' },
-          { id: '26', name: 'Cobra Silver', price: 38, stock: 25, sku: 'COBS001', barcode: '1234567915', category: 'Beverages' },
-          { id: '27', name: 'Cobra Platinum', price: 45, stock: 20, sku: 'COBP001', barcode: '1234567916', category: 'Beverages' },
-          { id: '28', name: 'Cobra Diamond', price: 50, stock: 15, sku: 'COBD001', barcode: '1234567917', category: 'Beverages' },
-          { id: '29', name: 'Cobra Titanium', price: 55, stock: 10, sku: 'COBT001', barcode: '1234567918', category: 'Beverages' },
-          { id: '30', name: 'Cobra Ultimate', price: 60, stock: 8, sku: 'COBU001', barcode: '1234567919', category: 'Beverages' },
-          // Food Items
-          { id: '31', name: 'Lucky Me Pancit Canton', price: 15, stock: 100, sku: 'LMPC001', barcode: '1234567920', category: 'Food Items' },
-          { id: '32', name: 'Lucky Me Beef Noodles', price: 15, stock: 95, sku: 'LMBN001', barcode: '1234567921', category: 'Food Items' },
-          { id: '33', name: 'Lucky Me Chicken Noodles', price: 15, stock: 90, sku: 'LMCN001', barcode: '1234567922', category: 'Food Items' },
-          { id: '34', name: 'Nissin Cup Noodles', price: 35, stock: 80, sku: 'NCN001', barcode: '1234567923', category: 'Food Items' },
-          { id: '35', name: 'Sky Flakes', price: 25, stock: 75, sku: 'SF001', barcode: '1234567924', category: 'Food Items' },
-          { id: '36', name: 'Fita Biscuits', price: 30, stock: 70, sku: 'FB001', barcode: '1234567925', category: 'Food Items' },
-          { id: '37', name: 'Rebisco Crackers', price: 28, stock: 65, sku: 'RC001', barcode: '1234567926', category: 'Food Items' },
-          { id: '38', name: 'Oreo Cookies', price: 45, stock: 60, sku: 'OC001', barcode: '1234567927', category: 'Food Items' },
-          // Personal Care
-          { id: '39', name: 'Safeguard Soap', price: 35, stock: 50, sku: 'SGS001', barcode: '1234567928', category: 'Personal Care' },
-          { id: '40', name: 'Dove Soap', price: 45, stock: 45, sku: 'DS001', barcode: '1234567929', category: 'Personal Care' },
-          { id: '41', name: 'Colgate Toothpaste', price: 55, stock: 40, sku: 'CT001', barcode: '1234567930', category: 'Personal Care' },
-          { id: '42', name: 'Crest Toothpaste', price: 60, stock: 35, sku: 'CRT001', barcode: '1234567931', category: 'Personal Care' },
-          { id: '43', name: 'Head & Shoulders Shampoo', price: 120, stock: 30, sku: 'HSS001', barcode: '1234567932', category: 'Personal Care' },
-          { id: '44', name: 'Pantene Shampoo', price: 110, stock: 25, sku: 'PS001', barcode: '1234567933', category: 'Personal Care' },
-          { id: '45', name: 'Sunsilk Shampoo', price: 100, stock: 20, sku: 'SS001', barcode: '1234567934', category: 'Personal Care' },
-          // Household Items
-          { id: '46', name: 'Tide Detergent', price: 85, stock: 40, sku: 'TD001', barcode: '1234567935', category: 'Household Items' },
-          { id: '47', name: 'Ariel Detergent', price: 90, stock: 35, sku: 'AD001', barcode: '1234567936', category: 'Household Items' },
-          { id: '48', name: 'Downy Fabric Softener', price: 75, stock: 30, sku: 'DFS001', barcode: '1234567937', category: 'Household Items' },
-          { id: '49', name: 'Zonrox Bleach', price: 40, stock: 25, sku: 'ZB001', barcode: '1234567938', category: 'Household Items' },
-          { id: '50', name: 'Mr. Muscle Cleaner', price: 95, stock: 20, sku: 'MMC001', barcode: '1234567939', category: 'Household Items' },
-          { id: '51', name: 'Glade Air Freshener', price: 65, stock: 15, sku: 'GAF001', barcode: '1234567940', category: 'Household Items' },
-          // Electronics
-          { id: '52', name: 'AA Batteries', price: 50, stock: 60, sku: 'AAB001', barcode: '1234567941', category: 'Electronics' },
-          { id: '53', name: 'AAA Batteries', price: 45, stock: 55, sku: 'AAAB001', barcode: '1234567942', category: 'Electronics' },
-          { id: '54', name: 'USB Cable', price: 120, stock: 40, sku: 'USBC001', barcode: '1234567943', category: 'Electronics' },
-          { id: '55', name: 'Phone Charger', price: 150, stock: 35, sku: 'PC001', barcode: '1234567944', category: 'Electronics' },
-          { id: '56', name: 'LED Bulb', price: 80, stock: 30, sku: 'LED001', barcode: '1234567945', category: 'Electronics' },
-          // Others
-          { id: '15', name: 'Vitamilk', price: 35, stock: 30, sku: 'VITA001', barcode: '1234567904', category: 'Others' },
-          { id: '16', name: 'Bear Brand', price: 40, stock: 25, sku: 'BEAR001', barcode: '1234567905', category: 'Others' },
-          { id: '17', name: 'Nestle Milk', price: 38, stock: 20, sku: 'NEST001', barcode: '1234567906', category: 'Others' },
-          { id: '18', name: 'Alaska Milk', price: 36, stock: 15, sku: 'ALAS001', barcode: '1234567907', category: 'Others' },
-        ];
-        setProducts(dummyProducts);
+        setProducts([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchProducts();
-  }, []);
+  }, [companyName, account, userLoading]);
 
   // Focus on barcode input when page loads
   useEffect(() => {
@@ -282,14 +197,61 @@ export default function SalesPage() {
     return cart.reduce((sum, item) => sum + item.subtotal, 0);
   };
 
-  // Handle manual product selection
-  const handleManualAdd = () => {
-    if (selectedProduct) {
-      addToCart(selectedProduct, manualQuantity);
-      setShowProductModal(false);
-      setSelectedProduct(null);
-      setManualQuantity(1);
-    }
+  // Download receipt
+  const printReceipt = (cartItems, total, orderId) => {
+    const now = new Date();
+    const dateTime = now.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const invoiceNumber = orderId || `INV-${Date.now().toString().slice(-8)}`;
+
+    // Create receipt content (plain text format for download)
+    const receiptContent = `
+========================================
+          POSYSTEM
+     Point of Sale System
+          RECEIPT
+========================================
+
+Invoice #: ${invoiceNumber}
+Date: ${dateTime}
+Cashier: System
+Customer: Walk-in Customer
+
+----------------------------------------
+ITEMS
+----------------------------------------
+${cartItems.map(item => 
+  `${item.name}
+  ${item.quantity} x ₱${item.price.toLocaleString()} = ₱${item.subtotal.toLocaleString()}`
+).join('\n\n')}
+
+----------------------------------------
+TOTAL: ₱${total.toLocaleString()}
+Payment: Cash
+Change: ₱0.00
+----------------------------------------
+
+Thank you for your purchase!
+Please come again
+
+========================================
+    `.trim();
+
+    // Create blob and download
+    const blob = new Blob([receiptContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Receipt_${invoiceNumber}_${now.toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Filter products for search and category
@@ -308,6 +270,12 @@ export default function SalesPage() {
 
   // Handle checkout
   const handleCheckout = async () => {
+    // Verify companyName and account before any write operation
+    if (!companyName || !account) {
+      alert('Company name or account not available. Cannot complete checkout.');
+      return;
+    }
+
     if (cart.length === 0) {
       alert('Cart is empty!');
       return;
@@ -329,7 +297,14 @@ export default function SalesPage() {
 
     try {
       const total = calculateTotal();
-      const orderData = {
+      
+      // Generate orderId locally (using timestamp and random string)
+      const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+
+      // Create transaction in nested path: Company/{companyCode}/Account/{userId}/Transactions/transactions
+      const transactionsPath = buildTransactionsPath(companyName, account);
+      await addNestedDocument(transactionsPath, {
+        orderId: orderId,
         items: cart.map((item) => ({
           productId: item.id,
           name: item.name,
@@ -337,21 +312,13 @@ export default function SalesPage() {
           quantity: item.quantity,
           subtotal: item.subtotal,
         })),
-        total: total,
-        status: 'completed',
-        createdAt: new Date().toISOString(),
-      };
-
-      // Create order
-      const orderId = await addDocument('orders', orderData);
-
-      // Create transaction
-      await addDocument('transactions', {
-        orderId: orderId,
         amount: total,
         paymentMethod: 'Cash',
         status: 'completed',
+        customerName: 'Walk-in Customer',
+        cashier: 'System',
         createdAt: new Date().toISOString(),
+        timestamp: new Date(),
       });
 
       // Update stock for each product in cart
@@ -369,16 +336,18 @@ export default function SalesPage() {
           };
 
           // Update in Firebase if product exists in Firebase (not dummy)
-          // Check if product has a Firebase ID (dummy products have simple IDs like '1', '2', etc.)
-          // Firebase IDs are typically longer alphanumeric strings
-          // For now, we'll try to update all products - if it fails for dummy products, that's okay
-          try {
-            await updateDocument('products', item.id, {
-              stock: newStock,
-            });
-          } catch (updateError) {
-            // If update fails (e.g., dummy product not in Firebase), just log and continue
-            console.log(`Product ${item.id} not in Firebase, updating local state only`);
+          // Check if product has fromFirebase flag or if it has a category
+          const product = updatedProducts[productIndex];
+          if (product.category) {
+            try {
+              const categoryPath = buildProductsPath(product.category, companyName, account);
+              await updateNestedDocument(categoryPath, item.id, {
+                stock: newStock,
+              });
+            } catch (updateError) {
+              // If update fails, just log and continue
+              console.log(`Failed to update product ${item.id} in Firebase:`, updateError.message);
+            }
           }
         }
       }
@@ -386,9 +355,25 @@ export default function SalesPage() {
       // Update products state with new stock
       setProducts(updatedProducts);
 
+      // Store total for success notification
+      setCheckoutTotal(total);
+
+      // Store cart items for receipt (before clearing)
+      const receiptCart = [...cart];
+
       // Clear cart
       setCart([]);
-      alert('Sale completed successfully!');
+      
+      // Show success notification (sliding modal)
+      setShowCheckoutSuccess(true);
+      
+      // Print receipt automatically
+      printReceipt(receiptCart, total, orderId);
+      
+      // Auto-hide after 1 second
+      setTimeout(() => {
+        setShowCheckoutSuccess(false);
+      }, 1000);
     } catch (error) {
       console.error('Error during checkout:', error);
       alert('Error processing sale. Please try again.');
@@ -401,13 +386,11 @@ export default function SalesPage() {
       <div className="p-6 w-full">
         <div className="w-full">
           <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900">POS / Sales</h1>
-            <p className="text-gray-600 mt-2">Scan or search products to add to cart</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-12rem)]">
             {/* Left Side - Product Search & Selection */}
-            <div className="lg:col-span-2 space-y-4">
+            <div className="lg:col-span-2 flex flex-col space-y-4">
               {/* Green Box Area - Search & SKU Scanner */}
               <div className="bg-white rounded-lg shadow-md p-4 space-y-4">
                 {/* Category Tabs */}
@@ -466,19 +449,16 @@ export default function SalesPage() {
               </div>
 
               {/* Red Box Area - Available Products */}
-              <div className="bg-white rounded-lg shadow-md p-4">
+              <div className="bg-white rounded-lg shadow-md p-4 flex-1 flex flex-col min-h-0">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Available Products</h2>
                 {loading ? (
                   <p className="text-center py-8 text-gray-500">Loading products...</p>
                 ) : filteredProducts.length > 0 ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2 max-h-96 overflow-y-auto">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2 flex-1 overflow-y-auto">
                     {filteredProducts.map((product) => (
                       <button
                         key={product.id}
-                        onClick={() => {
-                          setSelectedProduct(product);
-                          setShowProductModal(true);
-                        }}
+                        onClick={() => addToCart(product, 1)}
                         className="p-2 border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 text-center transition aspect-square flex flex-col items-center justify-center"
                       >
                         <p className="font-semibold text-xs text-gray-900 truncate w-full">
@@ -504,18 +484,18 @@ export default function SalesPage() {
             </div>
 
             {/* Right Side - Shopping Cart */}
-            <div className="lg:col-span-1">
+            <div className="lg:col-span-1 relative">
               <div className="bg-white rounded-lg shadow-md p-6 sticky top-6">
                 <div className="flex items-center gap-2 mb-4">
-                  <ShoppingCart className="w-5 h-5 text-blue-500" />
-                  <h2 className="text-xl font-bold text-gray-900">Shopping Cart</h2>
+                  <ShoppingCart className="w-5 h-5 text-black" />
+                  <h2 className="text-xl font-bold text-black">Shopping Cart</h2>
                 </div>
 
                 {cart.length === 0 ? (
                   <div className="text-center py-12">
                     <ShoppingCart className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">Cart is empty</p>
-                    <p className="text-sm text-gray-400 mt-2">
+                    <p className="text-black">Cart is empty</p>
+                    <p className="text-sm text-black mt-2">
                       Scan or search products to add items
                     </p>
                   </div>
@@ -529,8 +509,8 @@ export default function SalesPage() {
                         >
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex-1">
-                              <p className="font-semibold text-sm text-gray-900">{item.name}</p>
-                              <p className="text-xs text-gray-500">
+                              <p className="font-semibold text-sm text-black">{item.name}</p>
+                              <p className="text-xs text-black">
                                 ₱{item.price.toLocaleString()} each
                               </p>
                             </div>
@@ -546,7 +526,7 @@ export default function SalesPage() {
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                                className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-200"
+                                className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-200 text-black"
                               >
                                 <Minus className="w-4 h-4" />
                               </button>
@@ -562,12 +542,12 @@ export default function SalesPage() {
                               />
                               <button
                                 onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                                className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-200"
+                                className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-200 text-black"
                               >
                                 <Plus className="w-4 h-4" />
                               </button>
                             </div>
-                            <p className="font-semibold text-gray-900">
+                            <p className="font-semibold text-black">
                               ₱{item.subtotal.toLocaleString()}
                             </p>
                           </div>
@@ -577,8 +557,8 @@ export default function SalesPage() {
 
                     <div className="border-t border-gray-200 pt-4 mt-4">
                       <div className="flex justify-between items-center mb-4">
-                        <span className="text-lg font-semibold text-gray-900">Total:</span>
-                        <span className="text-2xl font-bold text-blue-600">
+                        <span className="text-lg font-semibold text-black">Total:</span>
+                        <span className="text-2xl font-bold text-black">
                           ₱{calculateTotal().toLocaleString()}
                         </span>
                       </div>
@@ -592,7 +572,7 @@ export default function SalesPage() {
 
                       <button
                         onClick={() => setCart([])}
-                        className="w-full mt-2 bg-gray-200 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                        className="w-full mt-2 bg-gray-200 text-black py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
                       >
                         Clear Cart
                       </button>
@@ -600,97 +580,52 @@ export default function SalesPage() {
                   </>
                 )}
               </div>
+
+              {/* Checkout Success Notification - Sliding Modal (Red Box Area) */}
+              {showCheckoutSuccess && (
+                <div
+                  className="absolute inset-0 bg-green-50 border-2 border-green-500 rounded-lg shadow-2xl p-6 z-50 flex flex-col items-center justify-center"
+                  style={{
+                    animation: 'slideInFromRight 0.5s ease-out',
+                  }}
+                >
+                  <button
+                    onClick={() => setShowCheckoutSuccess(false)}
+                    className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  
+                  <div className="flex flex-col items-center justify-center text-center">
+                    <div className="bg-green-500 rounded-full p-4 mb-4">
+                      <CheckCircle className="w-16 h-16 text-white" />
+                    </div>
+                    
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                      Checkout Successful!
+                    </h3>
+                    
+                    <p className="text-lg text-gray-700 mb-4">
+                      Sale completed successfully
+                    </p>
+                    
+                    <div className="bg-white rounded-lg p-4 w-full max-w-xs">
+                      <p className="text-sm text-gray-600 mb-1">Total Amount</p>
+                      <p className="text-3xl font-bold text-green-600">
+                        ₱{checkoutTotal.toLocaleString()}
+                      </p>
+                    </div>
+                    
+                    <p className="text-sm text-gray-500 mt-4">
+                      This notification will close automatically
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
-
-      {/* Manual Product Entry Modal */}
-      {showProductModal && selectedProduct && (
-        <div className="fixed inset-0 bg-white/30 backdrop-blur-md flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-black">Add Product</h3>
-              <button
-                onClick={() => {
-                  setShowProductModal(false);
-                  setSelectedProduct(null);
-                }}
-                className="text-black hover:text-gray-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <p className="font-semibold text-black">{selectedProduct.name}</p>
-              <p className="text-sm text-black mt-1">
-                Price: ₱{selectedProduct.price?.toLocaleString() || '0.00'}
-              </p>
-              {selectedProduct.stock !== undefined && (
-                <p className="text-sm text-black">
-                  Available Stock: {selectedProduct.stock || 0}
-                </p>
-              )}
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-black mb-2">
-                Quantity
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setManualQuantity(Math.max(1, manualQuantity - 1))}
-                  className="w-10 h-10 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-200 text-black"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-                <input
-                  type="number"
-                  value={manualQuantity}
-                  onChange={(e) =>
-                    setManualQuantity(Math.max(1, parseInt(e.target.value) || 1))
-                  }
-                  min="1"
-                  max={selectedProduct.stock || 999}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded text-center text-black"
-                />
-                <button
-                  onClick={() =>
-                    setManualQuantity(
-                      Math.min(
-                        selectedProduct.stock || 999,
-                        manualQuantity + 1
-                      )
-                    )
-                  }
-                  className="w-10 h-10 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-200 text-black"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handleManualAdd}
-                className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-              >
-                Add to Cart
-              </button>
-              <button
-                onClick={() => {
-                  setShowProductModal(false);
-                  setSelectedProduct(null);
-                }}
-                className="flex-1 bg-gray-200 text-black py-2 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

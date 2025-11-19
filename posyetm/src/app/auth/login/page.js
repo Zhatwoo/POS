@@ -1,10 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
 export default function LoginPage() {
+  const router = useRouter();
   const [formValues, setFormValues] = useState({
     company: '',
     username: '',
@@ -53,10 +55,8 @@ export default function LoginPage() {
     try {
       const identifier = formatIdentifier();
       await signInWithEmailAndPassword(auth, identifier, formValues.password);
-      setStatusMessage({
-        type: 'success',
-        text: `Welcome back, ${formValues.username}! You are now signed in for ${formValues.company}.`,
-      });
+      // Redirect to dashboard after successful login
+      router.push('/dashboard');
     } catch (error) {
       let friendlyMessage = 'Unable to log in right now. Please try again.';
       if (error.code === 'auth/invalid-email') {
