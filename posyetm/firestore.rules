@@ -102,7 +102,7 @@ service cloud.firestore {
         allow create, update, delete: if isAuthenticated() && accountId == request.auth.uid;
       }
     }
-    
+  
     // Allow collection queries for Products - needed for getNestedCollection to work
     // Accounts in the same company can query each other's products
     match /Company/{companyCode}/Account/{accountId}/Products/{category}/products {
@@ -111,7 +111,7 @@ service cloud.firestore {
                exists(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)) &&
                get(/databases/$(database)/documents/Company/$(companyCode)/Account/$(request.auth.uid)).data.companyCode == companyCode;
       }
-      
+    
       allow read: if isAuthenticated() && (accountId == request.auth.uid || isSameCompany() || isAdmin());
     }
     
